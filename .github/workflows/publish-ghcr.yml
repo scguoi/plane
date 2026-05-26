@@ -1,0 +1,110 @@
+name: publish-ghcr
+
+on:
+  push:
+    branches: [preview, main]
+    tags: ["v*"]
+    paths-ignore:
+      - "AGENTS.md"
+      - "docs/**"
+      - "**/*.md"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  PLATFORMS: linux/amd64
+
+jobs:
+  container:
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: frontend
+            context: .
+            dockerfile: ./apps/web/Dockerfile.web
+          - component: backend
+            context: ./apps/api
+            dockerfile: ./apps/api/Dockerfile.api
+          - component: admin
+            context: .
+            dockerfile: ./apps/admin/Dockerfile.admin
+          - component: space
+            context: .
+            dockerfile: ./apps/space/Dockerfile.space
+          - component: live
+            context: .
+            dockerfile: ./apps/live/Dockerfile.live
+          - component: proxy
+            context: ./apps/proxy
+            dockerfile: ./apps/proxy/Dockerfile.ce
+    steps:
+      - name: Checkout repository
+        run: |
+          git init .
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --depth 1 origin "${GITHUB_SHA}"
+          git checkout --detach FETCH_HEAD
+
+      - name: Login to GHCR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GITHUB_TOKEN" | docker login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
+
+      - name: Prepare image tags
+        id: image
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          COMPONENT: ${{ matrix.component }}
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          image="ghcr.io/${owner}/plane-${COMPONENT}"
+          short_sha="${GITHUB_SHA::12}"
+
+          tags="-t ${image}:sha-${short_sha}"
+
+          if [[ "${GITHUB_REF_TYPE}" == "branch" ]]; then
+            branch="${GITHUB_REF_NAME//\//-}"
+            tags="${tags} -t ${image}:${branch}"
+
+            if [[ "${GITHUB_REF_NAME}" == "${DEFAULT_BRANCH}" ]]; then
+              tags="${tags} -t ${image}:latest"
+            fi
+          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            tag="${GITHUB_REF_NAME}"
+            version="${tag#v}"
+            tags="${tags} -t ${image}:${tag} -t ${image}:${version}"
+
+            if [[ "${version}" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              major="${BASH_REMATCH[1]}"
+              minor="${BASH_REMATCH[2]}"
+              tags="${tags} -t ${image}:${major}.${minor}"
+            fi
+          fi
+
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+          echo "tags=${tags}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up buildx
+        run: |
+          docker buildx create --name "forgeflow-plane-${{ matrix.component }}" --use
+          docker buildx inspect --bootstrap
+
+      - name: Build and publish image
+        run: |
+          docker buildx build \
+            --file "${{ matrix.dockerfile }}" \
+            --platform "${PLATFORMS}" \
+            --push \
+            ${{ steps.image.outputs.tags }} \
+            --cache-from "type=registry,ref=${{ steps.image.outputs.image }}:buildcache" \
+            --cache-to "type=registry,ref=${{ steps.image.outputs.image }}:buildcache,mode=max" \
+            "${{ matrix.context }}"

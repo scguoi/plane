@@ -34,3 +34,11 @@ Prereq (once): `./setup.sh` — generates `apps/api/.env` from `.env.example`.
 - Teardown: `docker compose -f docker-compose-test.yml down -v`
 
 See `apps/api/tests/RUNNING_TESTS.md` for the full walkthrough and troubleshooting; see `apps/api/tests/TESTING_GUIDE.md` for test conventions and fixtures.
+
+## End-to-End Verification
+
+- Do not report deployment, publishing, release, CI, or automation work as complete while the relevant remote job is still running.
+- For GitHub Actions changes, wait for the triggered run to finish and inspect the final conclusion.
+- If the workflow publishes an artifact such as a container image, verify the artifact exists after the workflow succeeds.
+- If a run fails, inspect the failed logs, fix the workflow or implementation, push the fix, and repeat until the end-to-end result is confirmed or a real external blocker is identified.
+- Status such as "started", "in progress", or "entered the build step" is only a progress update, not a completion result.
