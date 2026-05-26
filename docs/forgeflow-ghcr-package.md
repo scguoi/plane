@@ -41,5 +41,5 @@ No Docker Hub credentials are required.
 
 ## Deployment note
 
-The first ForgeFlow publishing flow builds the six core Plane component images for `linux/amd64`.
+The workflow builds the six core Plane component images for `linux/amd64` and `linux/arm64`.
 The all-in-one community image should be added after the component image flow is stable.
